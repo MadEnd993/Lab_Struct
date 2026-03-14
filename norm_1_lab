@@ -1,0 +1,31 @@
+#include <iostream>
+
+int main() {
+    std::cout << "Выполнил Цой Тимофей Викторович | 090304-РПИа-о25\n";
+    
+    long long a, b;
+    if (!(std::cin >> a >> b)) return 0;
+
+    if (a >= 2 && b <= 2000000000) {
+        long long current_rem = 1;
+        bool found = false;
+
+        for (int n = 1; n <= 64; n++) {
+            current_rem = (current_rem * (b % a)) % a;
+            
+            if (current_rem == 0) {
+                std::cout << "Минимальная степень числа B = " << n << std::endl;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            std::cout << "-1" << std::endl;
+        }
+    } else {
+        std::cout << "Введите другие числа, они должны подходить под условие" << std::endl;
+    }
+
+    return 0;
+}
