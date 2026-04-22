@@ -34,8 +34,7 @@ func convertTo2D(flat []complex128) [][]complex128 {
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
-
-	fmt.Println("Генерация матриц (размер 1024x1024)...")
+	fmt.Println("Выполнил Цой Тимофей Викторович 090304-РПИа-о25")
 	A_flat := generateFlatMatrix()
 	B_flat := generateFlatMatrix()
 
