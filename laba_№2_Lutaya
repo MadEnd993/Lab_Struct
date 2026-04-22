@@ -1,0 +1,183 @@
+package main
+
+/*
+#cgo LDFLAGS: -lopenblas
+#include <cblas.h>
+*/
+import "C"
+import (
+	"fmt"
+	"math/rand"
+	"runtime"
+	"sync"
+	"time"
+	"unsafe"
+)
+
+const n = 1024
+
+func generateFlatMatrix() []complex128 {
+	mat := make([]complex128, n*n)
+	for i := 0; i < n*n; i++ {
+		mat[i] = complex(rand.Float64(), rand.Float64())
+	}
+	return mat
+}
+
+func convertTo2D(flat []complex128) [][]complex128 {
+	mat := make([][]complex128, n)
+	for i := range mat {
+		mat[i] = flat[i*n : (i+1)*n]
+	}
+	return mat
+}
+
+func main() {
+	rand.Seed(time.Now().UnixNano())
+
+	fmt.Println("Генерация матриц (размер 1024x1024)...")
+	A_flat := generateFlatMatrix()
+	B_flat := generateFlatMatrix()
+
+	fmt.Println("\nВыберите метод перемножения:")
+	fmt.Println("1. Классический (по формуле из линейной алгебры)")
+	fmt.Println("2. Библиотечный (через библиотеку OpenBLAS)")
+	fmt.Println("3. Оптимизированный на Go (Параллельный I-K-J)")
+	fmt.Println("4. Выполнить все 3 варианта по очереди")
+	fmt.Print("Введите номер: ")
+
+	var choice int
+	fmt.Scanln(&choice)
+
+	c := 2.0 * float64(n) * float64(n) * float64(n)
+
+	switch choice {
+	case 1:
+		runClassic(A_flat, B_flat, c)
+	case 2:
+		runOpenBLAS(A_flat, B_flat, c)
+	case 3:
+		runOptimizedGo(A_flat, B_flat, c)
+	case 4:
+		runClassic(A_flat, B_flat, c)
+		fmt.Println("\n-----------------------------------\n")
+		runOpenBLAS(A_flat, B_flat, c)
+		fmt.Println("\n-----------------------------------\n")
+		runOptimizedGo(A_flat, B_flat, c)
+	default:
+		fmt.Println("Неверный выбор. Завершение работы.")
+	}
+}
+
+func runClassic(A_flat, B_flat []complex128, c float64) {
+	fmt.Println("\n[Старт] 1-й вариант: Классическое перемножение по формуле...")
+
+	A := convertTo2D(A_flat)
+	B := convertTo2D(B_flat)
+	C := make([][]complex128, n)
+	for i := range C {
+		C[i] = make([]complex128, n)
+	}
+
+	start := time.Now()
+
+	for i := 0; i < n; i++ {
+		for j := 0; j < n; j++ {
+			var sum complex128 = 0
+			for k := 0; k < n; k++ {
+				sum += A[i][k] * B[k][j]
+			}
+			C[i][j] = sum
+		}
+	}
+
+	elapsed := time.Since(start).Seconds()
+	p := (c / elapsed) * 1e-6
+
+	fmt.Println("[Успешно завершено]")
+	fmt.Printf("Время работы (t): %.4f секунд\n", elapsed)
+	fmt.Printf("Производительность (p): %.2f MFlops\n", p)
+}
+
+func runOpenBLAS(A_flat, B_flat []complex128, c float64) {
+	fmt.Println("\n[Старт] 2-й вариант: Перемножение через OpenBLAS...")
+
+	C_flat := make([]complex128, n*n)
+	alpha := complex(1.0, 0.0)
+	beta := complex(0.0, 0.0)
+
+	var pinner runtime.Pinner
+	pinner.Pin(&A_flat[0])
+	pinner.Pin(&B_flat[0])
+	pinner.Pin(&C_flat[0])
+	defer pinner.Unpin()
+
+	start := time.Now()
+
+	C.cblas_zgemm(
+		C.CblasRowMajor,
+		C.CblasNoTrans,
+		C.CblasNoTrans,
+		C.int(n), C.int(n), C.int(n),
+		unsafe.Pointer(&alpha),
+		unsafe.Pointer(&A_flat[0]), C.int(n),
+		unsafe.Pointer(&B_flat[0]), C.int(n),
+		unsafe.Pointer(&beta),
+		unsafe.Pointer(&C_flat[0]), C.int(n),
+	)
+
+	elapsed := time.Since(start).Seconds()
+	p := (c / elapsed) * 1e-6
+
+	fmt.Println("[Успешно завершено]")
+	fmt.Printf("Время работы (t): %.6f секунд\n", elapsed)
+	fmt.Printf("Производительность (p): %.2f MFlops\n", p)
+}
+
+func runOptimizedGo(A_flat, B_flat []complex128, c float64) {
+	fmt.Println("\n[Старт] 3-й вариант: Оптимизированный алгоритм на Go (Параллельный I-K-J)...")
+
+	C_flat := make([]complex128, n*n)
+
+	numCPU := runtime.NumCPU()
+	var wg sync.WaitGroup
+
+	start := time.Now()
+
+	chunkSize := n / numCPU
+
+	for w := 0; w < numCPU; w++ {
+		wg.Add(1)
+
+		startRow := w * chunkSize
+		endRow := (w + 1) * chunkSize
+		if w == numCPU-1 {
+			endRow = n
+		}
+
+		go func(sRow, eRow int) {
+			defer wg.Done()
+
+			for i := sRow; i < eRow; i++ {
+				iOffset := i * n
+				for k := 0; k < n; k++ {
+					aValue := A_flat[iOffset+k]
+					kOffset := k * n
+
+					for j := 0; j < n; j++ {
+						C_flat[iOffset+j] += aValue * B_flat[kOffset+j]
+					}
+				}
+			}
+		}(startRow, endRow)
+	}
+
+	wg.Wait()
+
+	elapsed := time.Since(start).Seconds()
+	p := (c / elapsed) * 1e-6
+
+	fmt.Println("[Успешно завершено]")
+	fmt.Printf("Время работы (t): %.4f секунд\n", elapsed)
+	fmt.Printf("Производительность (p): %.2f MFlops\n", p)
+}
